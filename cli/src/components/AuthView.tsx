@@ -18,6 +18,8 @@ import { useStdinContext } from "../context/StdinContext"
 import { useClineFeaturedModels } from "../hooks/useClineFeaturedModels"
 import { useOcaAuth } from "../hooks/useOcaAuth"
 import { useScrollableList } from "../hooks/useScrollableList"
+import { useTerminalSize } from "../hooks/useTerminalSize"
+import { copyToClipboardWithFeedback } from "../utils/clipboard"
 import { type DetectedSources, detectImportSources, type ImportSource } from "../utils/import-configs"
 import { isEnterKey, isMouseEscapeSequence } from "../utils/input"
 import { applyBedrockConfig, applyProviderConfig } from "../utils/provider-config"
@@ -157,6 +159,7 @@ const TextInput: React.FC<{
 
 export const AuthView: React.FC<AuthViewProps> = ({ controller, onComplete, onError, onNavigateToWelcome }) => {
 	const { exit } = useApp()
+	const { columns: terminalWidth } = useTerminalSize()
 
 	const providers = useValidProviders()
 
@@ -177,6 +180,8 @@ export const AuthView: React.FC<AuthViewProps> = ({ controller, onComplete, onEr
 	const [importSources, setImportSources] = useState<DetectedSources>({ codex: false, opencode: false })
 	const [importSource, setImportSource] = useState<ImportSource | null>(null)
 	const [bedrockConfig, setBedrockConfig] = useState<BedrockConfig | null>(null)
+	const [authUrl, setAuthUrl] = useState<string>("")
+	const [clipboardCopied, setClipboardCopied] = useState(false)
 
 	// OCA auth hook - enabled when step is oca_auth
 	const handleOcaAuthSuccess = useCallback(async () => {
@@ -330,8 +335,18 @@ export const AuthView: React.FC<AuthViewProps> = ({ controller, onComplete, onEr
 	// Start Cline auth flow
 	const startClineAuth = useCallback(async () => {
 		try {
+			setAuthUrl("") // Clear previous URL
+			setClipboardCopied(false)
 			setStep("cline_auth")
-			await AuthService.getInstance(controller).createAuthRequest()
+			const result = await AuthService.getInstance(controller).createAuthRequest()
+			if (result.value) {
+				setAuthUrl(result.value)
+				// Try to copy to clipboard
+				const { usedClipboard } = copyToClipboardWithFeedback(result.value)
+				if (usedClipboard) {
+					setClipboardCopied(true)
+				}
+			}
 		} catch (error) {
 			setErrorMessage(error instanceof Error ? error.message : String(error))
 			setStep("error")
@@ -731,7 +746,9 @@ export const AuthView: React.FC<AuthViewProps> = ({ controller, onComplete, onEr
 				return <OcaEmployeeCheck isActive={step === "oca_employee_check"} onCancel={goBack} onSignIn={startOcaAuth} />
 
 			case "oca_auth":
-			case "cline_auth":
+			case "cline_auth": {
+				// Check if URL fits in terminal (leave room for borders and padding)
+				const urlFitsInline = authUrl.length < terminalWidth - 10
 				return (
 					<Box flexDirection="column">
 						<Box>
@@ -742,10 +759,31 @@ export const AuthView: React.FC<AuthViewProps> = ({ controller, onComplete, onEr
 						</Box>
 						<Text> </Text>
 						<Text color="gray">Complete sign-in in your browser, then return here.</Text>
+						{authUrl && (
+							<React.Fragment>
+								<Text> </Text>
+								{clipboardCopied ? (
+									<Text color="green">✓ URL copied to clipboard!</Text>
+								) : (
+									<Text color="cyan">Or open this URL manually:</Text>
+								)}
+								<Box flexDirection="column" marginBottom={1} marginLeft={1}>
+									{urlFitsInline ? (
+										<Text color="brightBlack">{authUrl}</Text>
+									) : (
+										// On narrow terminals, show URL on separate lines for easier copying
+										<Text color="brightBlack" wrap="wrap">
+											{authUrl}
+										</Text>
+									)}
+								</Box>
+							</React.Fragment>
+						)}
 						<Text> </Text>
 						<Text color="gray">Esc to cancel</Text>
 					</Box>
 				)
+			}
 
 			case "openai_codex_auth":
 				return (

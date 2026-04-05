@@ -27,6 +27,8 @@ import { COLORS } from "../constants/colors"
 import { useStdinContext } from "../context/StdinContext"
 import { useClineFeaturedModels } from "../hooks/useClineFeaturedModels"
 import { useOcaAuth } from "../hooks/useOcaAuth"
+import { useTerminalSize } from "../hooks/useTerminalSize"
+import { copyToClipboardWithFeedback } from "../utils/clipboard"
 import { isMouseEscapeSequence } from "../utils/input"
 import { applyBedrockConfig, applyProviderConfig } from "../utils/provider-config"
 import { ApiKeyInput } from "./ApiKeyInput"
@@ -156,6 +158,7 @@ export const SettingsPanelContent: React.FC<SettingsPanelContentProps> = ({
 	initialModelKey,
 }) => {
 	const { isRawModeSupported } = useStdinContext()
+	const { columns: terminalWidth } = useTerminalSize()
 	const stateManager = StateManager.get()
 
 	// UI state
@@ -235,6 +238,8 @@ export const SettingsPanelContent: React.FC<SettingsPanelContentProps> = ({
 	const [isAccountLoading, setIsAccountLoading] = useState(false)
 	const [isPickingOrganization, setIsPickingOrganization] = useState(false)
 	const [isWaitingForClineAuth, setIsWaitingForClineAuth] = useState(false)
+	const [authUrl, setAuthUrl] = useState<string>("")
+	const [clipboardCopied, setClipboardCopied] = useState(false)
 	const [accountChecked, setAccountChecked] = useState(false) // Tracks if we've already checked auth
 
 	// Get current provider and model info
@@ -366,10 +371,22 @@ export const SettingsPanelContent: React.FC<SettingsPanelContentProps> = ({
 			return
 		}
 		// Set waiting state first (synchronously) to show the waiting UI immediately
+		setAuthUrl("") // Clear previous URL
+		setClipboardCopied(false)
 		setIsWaitingForClineAuth(true)
 		// Then start the auth request (async, but we don't need to await)
 		AuthService.getInstance(controller)
 			.createAuthRequest()
+			.then((result) => {
+				if (result.value) {
+					setAuthUrl(result.value)
+					// Try to copy to clipboard
+					const { usedClipboard } = copyToClipboardWithFeedback(result.value)
+					if (usedClipboard) {
+						setClipboardCopied(true)
+					}
+				}
+			})
 			.catch(() => {
 				setIsWaitingForClineAuth(false)
 			})
@@ -1609,6 +1626,11 @@ export const SettingsPanelContent: React.FC<SettingsPanelContentProps> = ({
 					<Box marginTop={1}>
 						<Text color="gray">Complete sign-in in your browser.</Text>
 					</Box>
+					{clipboardCopied && (
+						<Box marginTop={1}>
+							<Text color="green">✓ URL copied to clipboard!</Text>
+						</Box>
+					)}
 					<Box marginTop={1}>
 						<Text color="gray">Esc to cancel</Text>
 					</Box>
@@ -1829,7 +1851,19 @@ export const SettingsPanelContent: React.FC<SettingsPanelContentProps> = ({
 		isBedrockCustomFlow ||
 		isEditing
 
-	return (
+	// Show auth URL outside the panel border when waiting for auth
+	const showAuthUrlBelow = isWaitingForClineAuth && authUrl
+
+	return showAuthUrlBelow ? (
+		<React.Fragment>
+			<Panel currentTab={currentTab} isSubpage={isSubpage} label="Settings" tabs={TABS}>
+				{renderContent()}
+			</Panel>
+			<Box marginTop={0}>
+				<Text color="brightBlack">{authUrl}</Text>
+			</Box>
+		</React.Fragment>
+	) : (
 		<Panel currentTab={currentTab} isSubpage={isSubpage} label="Settings" tabs={TABS}>
 			{renderContent()}
 		</Panel>
